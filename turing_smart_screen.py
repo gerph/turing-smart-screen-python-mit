@@ -11,6 +11,9 @@ is more enclosed and includes rear lights.
 The original interfaces was decoded and published at:
     https://github.com/mathoudebine/turing-smart-screen-python
 
+That version is better developed with example code, etc. However, I needed
+to access the device without using GPL code.
+
 This code is a re-write using none of the original code, which is placed under
 the less restrictive MIT license.
 
@@ -517,3 +520,18 @@ class TuringDisplayVariant2(TuringDisplayBase):
 
         # A delay is required between sending the data and the next command.
         self.last_bitmap_time = time.time()
+
+
+def TuringDisplayAutoSelect(device):
+    """
+    Constructor for whichever display type works.
+
+    @param device:  Serial device
+    """
+    try:
+        display = TuringDisplayVariant2(device)
+    except TuringProtocolError:
+        # The device didn't respond as expected, which probably means its variant 1.
+        display = TuringDisplayVariant1(device)
+
+    return display
