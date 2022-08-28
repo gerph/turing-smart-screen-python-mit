@@ -63,8 +63,14 @@ class TuringNotImplementedError(TuringError, NotImplementedError):
 
 
 class TuringDisplayBase(object):
+    # Portrait is the default; landscape is not implemented in variant 1.
     ORIENTATION_PORTRAIT = 0
     ORIENTATION_LANDSCAPE = 1
+
+    # Inversion of the content
+    INVERT_X = 1
+    INVERT_Y = 2
+    INVERT_XY = 3
 
     # Dimensions of the display, assuming portrait orientation
     WIDTH = 320
@@ -77,6 +83,9 @@ class TuringDisplayBase(object):
 
         # We remember the orientation so that we can change our coordinates.
         self._orientation = self.ORIENTATION_PORTRAIT
+
+        # Inversion is implemented internally
+        self._invert = 0
 
         # We remember the brightness so that we might simulate the display off.
         self._brightness = 0
@@ -124,6 +133,14 @@ class TuringDisplayBase(object):
         """
         self._orientation = state
         raise TuringNotImplementedError("{}.orientation is not implemented".format(self.__class__.__name__))
+
+    def invert(self, state):
+        """
+        Set whether the content is vertically inverted.
+
+        @param state:       0, INVERT_X, INVERT_Y or INVERT_Y to change the inversion state of content.
+        """
+        self._invert = state
 
     def backlight(self, red, green, blue):
         """
@@ -195,6 +212,52 @@ class TuringDisplayBase(object):
                 rgb_data.append(full_rgb_data[col, row])
 
         self.update_region(x, y, x1 - x0, y1 - y0, rgb_data)
+
+    def apply_inversion(self, x, y, width, height, rgb_data):
+        """
+        Update the RGB data and position for the invert parameter.
+
+        @param x, y:            Top left coordinates to plot at
+        @param width, height:   Size of the data supplied
+        @param rgb_data:        List of pixel values in tuples of 8 bit (R, G, B) values,
+                                in row-major format (ie across the width, first)
+
+        @return: Tuple of updated parameters in the form: (x, y, width, height, rgb_data)
+        """
+        if not self._invert:
+            return (x, y, width, height, rgb_data)
+
+        # They want this data inverted in some way, so we need to reverse the order of the rows
+        # and update the position.
+
+        x1 = x + width
+        y1 = y + height
+
+        # Invert the row data.
+        new_rgb_data = []
+        if self._invert == self.INVERT_Y:
+            offset = height * width
+            for row in range(height):
+                offset -= width
+                new_rgb_data.extend(rgb_data[offset:offset + width])
+        elif self._invert == self.INVERT_XY:
+            offset = height * width
+            for row in range(height):
+                offset -= width
+                new_rgb_data.extend(reversed(rgb_data[offset:offset + width]))
+        else:
+            for offset in range(0, width * height, width):
+                newdata = reversed(rgb_data[offset:offset + width])
+                new_rgb_data.extend(newdata)
+
+        rgb_data = new_rgb_data
+        if self._invert in (self.INVERT_Y, self.INVERT_XY):
+            (y1, y) = (self.height - y, self.height - y1)
+
+        if self._invert in (self.INVERT_X, self.INVERT_XY):
+            (x1, x) = (self.width - x, self.width - x1)
+
+        return (x, y, width, height, rgb_data)
 
 
 class TuringDisplayVariant1(TuringDisplayBase):
@@ -275,6 +338,9 @@ class TuringDisplayVariant1(TuringDisplayBase):
                                 in row-major format (ie across the width, first)
         """
         assert len(rgb_data) >= width * height, "Not enough data supplied to update region of {}x{} (only {} pixels present)".format(width, height, len(rgb_data))
+
+        (x, y, width, height, rgb_data) = self.apply_inversion(x, y, width, height, rgb_data)
+
         x1 = x + width - 1
         y1 = y + height - 1
         self.send_command(self.CMD_UPDATE_BITMAP,
@@ -362,10 +428,10 @@ class TuringDisplayVariant2(TuringDisplayBase):
 
         @param state: Orientation to apply (ORIENTATION_PORTRAIT or ORIENTATION_LANDSCAPE)
         """
-        assert state in (self.ORIENTATION_PORTRAIT, self. ORIENTATION_LANDSCAPE), "Orientation must be one of ORIENTATION_PORTRAIT or ORIENTATION_LANDSCAPE"
+        assert state in (self.ORIENTATION_PORTRAIT, self.ORIENTATION_LANDSCAPE), "Orientation must be one of ORIENTATION_PORTRAIT or ORIENTATION_LANDSCAPE"
         self._orientation = state
 
-        # The constants map to the parameters the device uses, so we can pass through
+        # The constants for portrait are the only one we can actually apply to the hardware.
         self.send_command(self.CMD_SET_ORIENTATION, payload=[state])
 
     def backlight(self, red, green, blue):
@@ -419,6 +485,9 @@ class TuringDisplayVariant2(TuringDisplayBase):
                                 in row-major format (ie across the width, first)
         """
         assert len(rgb_data) >= width * height, "Not enough data supplied to update region of {}x{} (only {} pixels present)".format(width, height, len(rgb_data))
+
+        (x, y, width, height, rgb_data) = self.apply_inversion(x, y, width, height, rgb_data)
+
         x1 = x + width - 1
         y1 = y + height - 1
         self.send_command(self.CMD_UPDATE_BITMAP,
