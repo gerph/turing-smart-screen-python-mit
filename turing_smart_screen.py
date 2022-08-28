@@ -70,6 +70,8 @@ class TuringDisplayBase(object):
     WIDTH = 320
     HEIGHT = 480
 
+    INTER_BITMAP_DELAY = 0.02
+
     def __init__(self, device):
         self.device = device
 
@@ -81,6 +83,15 @@ class TuringDisplayBase(object):
 
         # Display enabled state
         self._enable = True
+
+        # We need a delay between the bitmap data and the next command.
+        self.inter_bitmap_delay = self.INTER_BITMAP_DELAY
+
+        # To implement that, we remember the time that the last update happened
+        # and ensure that the next command occurs after that. By deferring the
+        # delay to the issuing of the command, we allow other things to happen
+        # in parallel with that delay.
+        self.last_bitmap_time = 0
 
     @property
     def width(self):
@@ -199,8 +210,6 @@ class TuringDisplayVariant1(TuringDisplayBase):
     CMD_SET_BRIGHTNESS = 110
     CMD_UPDATE_BITMAP = 197
 
-    INTER_BITMAP_DELAY = 0.01
-
     def send_command(self, cmd, payload=None):
         if payload is None:
             payload = [0] * 5
@@ -210,6 +219,12 @@ class TuringDisplayVariant1(TuringDisplayBase):
         data = bytearray()
         data.extend(payload)
         data.append(cmd)
+
+        # See whether we need to wait before issuing the next command.
+        # If we don't wait, we get a corrupted display.
+        elapsed = time.time() - self.last_bitmap_time
+        if elapsed < self.inter_bitmap_delay:
+            time.sleep(self.inter_bitmap_delay - elapsed)
 
         self.device.write(bytes(data))
 
@@ -289,7 +304,7 @@ class TuringDisplayVariant1(TuringDisplayBase):
             self.device.write(b''.join(accumulator))
 
         # A delay is required between sending the data and the next command.
-        time.sleep(self.INTER_BITMAP_DELAY)
+        self.last_bitmap_time = time.time()
 
 
 class TuringDisplayVariant2(TuringDisplayBase):
@@ -302,8 +317,6 @@ class TuringDisplayVariant2(TuringDisplayBase):
     CMD_UPDATE_BITMAP = 0xcc
     CMD_SET_BACKLIGHT = 0xcd
     CMD_SET_BRIGHTNESS = 0xce
-
-    INTER_BITMAP_DELAY = 0.01
 
     def __init__(self, device):
         super(TuringDisplayVariant2, self).__init__(device)
@@ -332,6 +345,12 @@ class TuringDisplayVariant2(TuringDisplayBase):
         data[0] = cmd
         data.extend(payload)
         data.append(cmd)
+
+        # See whether we need to wait before issuing the next command.
+        # If we don't wait, we get a corrupted display.
+        elapsed = time.time() - self.last_bitmap_time
+        if elapsed < self.inter_bitmap_delay:
+            time.sleep(self.inter_bitmap_delay - elapsed)
 
         self.device.write(bytes(data))
 
@@ -428,4 +447,4 @@ class TuringDisplayVariant2(TuringDisplayBase):
             self.device.write(b''.join(accumulator))
 
         # A delay is required between sending the data and the next command.
-        time.sleep(self.INTER_BITMAP_DELAY)
+        self.last_bitmap_time = time.time()
