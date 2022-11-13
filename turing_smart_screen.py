@@ -41,6 +41,7 @@ SOFTWARE.
 """
 
 import struct
+import sys
 import time
 
 
@@ -196,7 +197,7 @@ class TuringDisplayBase(object):
                Alpha channel is ignored.
         """
 
-        full_rgb_data = image.load()
+        full_data = image.load()
 
         if width is None:
             width = image.size[0]
@@ -210,9 +211,41 @@ class TuringDisplayBase(object):
         # we support. It happens that the return from Pillow is accessible as an
         # indexed R, G, B value, so there's no need to create a separate tuple.
         rgb_data = []
-        for row in range(y0, y1):
-            for col in range(x0, x1):
-                rgb_data.append(full_rgb_data[col, row])
+
+        if image.mode == 'P':
+            # Paletted image data.
+            # We must convert this to RGB data.
+            palette = image.palette
+            if palette.mode in ('RGBA', 'RGB'):
+                # The data here appears to only be RGB, even through the mode was given as RGBA.
+                palette_data = palette.getdata()[1]
+                palette = bytearray(palette_data)
+                entries = int(len(palette_data) / 3)
+                palette = [tuple(bytearray(palette_data[n * 3:n * 3 + 3])) for n in range(entries)]
+            else:
+                raise TuringNotImplementedError("Pillow palette mode '{}' is not supported".format(palette.mode))
+
+            for row in range(y0, y1):
+                for col in range(x0, x1):
+                    pal = full_data[col, row]
+                    colour = palette[pal] if pal < len(palette) else (0, 0, 0)
+                    rgb_data.append(colour)
+
+                    # Diagnostics, if you need them:
+                    #if colour == (0, 0, 0):
+                    #    sys.stdout.write(' ')
+                    #else:
+                    #    brightness = int((colour[0] + colour[1] + colour[2]) / (256.0 * 3 / 10))
+                    #    sys.stdout.write(chr(48 + brightness))
+                #sys.stdout.write("\n")
+
+        elif image.mode in ('RGB', 'RGBA', 'RGBX', 'RGBa'):
+            # RGB format images
+            for row in range(y0, y1):
+                for col in range(x0, x1):
+                    rgb_data.append(full_data[col, row])
+        else:
+            raise TuringNotImplementedError("Pillow image mode '{}' is not supported".format(image.mode))
 
         self.update_region(x, y, x1 - x0, y1 - y0, rgb_data)
 
@@ -346,6 +379,13 @@ class TuringDisplayVariant1(TuringDisplayBase):
 
         x1 = x + width - 1
         y1 = y + height - 1
+
+        # Don't allow the position to exceed the size that is representable
+        x = min(1023, x)
+        x1 = min(1023, x1)
+        y = min(1023, y)
+        y1 = min(1023, y1)
+
         self.send_command(self.CMD_UPDATE_BITMAP,
                           payload=[(x>>2),
                                    ((x & 3) << 6) | (y >> 4),
@@ -395,7 +435,7 @@ class TuringDisplayVariant2(TuringDisplayBase):
         hello = bytearray(b'HELLO')
         self.send_command(self.CMD_HELLO, payload=hello)
 
-        response = device.read(10)
+        response = bytearray(device.read(10))
 
         if len(response) != 10:
             raise TuringProtocolError("TuringDisplay serial device not recognised (short response to HELLO)")
@@ -530,8 +570,10 @@ def TuringDisplayAutoSelect(device):
     """
     try:
         display = TuringDisplayVariant2(device)
-    except TuringProtocolError:
+    except TuringProtocolError as exc:
         # The device didn't respond as expected, which probably means its variant 1.
+        # If you need to know the error, check here:
+        #print("Error : %s" % (exc,))
         display = TuringDisplayVariant1(device)
 
     return display
